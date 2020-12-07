@@ -1,0 +1,10 @@
+.navbar {
+  display: flex;
+  justify-content: space-evenly;
+  background-color: #eee;
+  margin-bottom: 15px;
+}
+
+.appContainer {
+  padding: 15px;
+}
