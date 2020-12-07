@@ -40,6 +40,7 @@ export const useTypedSwitch = (
   routes: ReadonlyArray<{ path: Path, component: ComponentType }>,
   fallbackComponent?: ComponentType,
 ): ComponentType => {
+  const Fallback = fallbackComponent;
   return () => (
     <Switch>
       {routes.map(({ path, component: RouteComponent }, i) => (
@@ -47,6 +48,7 @@ export const useTypedSwitch = (
           <RouteComponent />
         </Route>
       ))}
+      {Fallback && <Fallback />}
     </Switch>
   );
 }
