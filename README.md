@@ -1,46 +1,277 @@
-# Getting Started with Create React App
+# Typescript-Friendly React Router Example
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+This example shows you how to use `react-router` in more type-safe way.
 
-## Available Scripts
+## Problem
+1. `react-router` takes any plain string as a path. This makes it difficult to refactor routing when it is required to rename/delete/add routes. Also typos are hard to detect.
+2. Developers need to provide types for `useParams` hook (i.e. `useParams<{ id: string }>`). It has the same issue with refactoring. Developers need to update `useParams` hooks whenever there's a change in URL parameter names.
 
-In the project directory, you can run:
+## Solution (Walkthrough)
+### `src/hooks/paths.tsx`
+The single source of truth for available paths is defined
+in this module.
+If a route needs to be modified, this `PATH_SPECS`
+can be fixed, then TypeScript compiler will raise errors where
+type incompatibilities are found.
+```tsx
+const PATH_SPECS = [
+  {
+    path: '/',
+    params: [],
+  },
+  {
+    path: '/signup',
+    params: [],
+  },
+  {
+    path: '/login',
+    params: [],
+  },
+  {
+    path: '/post/:id',
+    params: ['id'],
+  },
+  {
+    path: '/calendar/:year/:month',
+    params: ['year', 'month'],
+  },
+] as const;
+```
+Utility types can be derived from this readonly array of spec objects.
+```ts
+type PathSpec = (typeof PATH_SPECS)[number];
+export type Path = PathSpec['path'];
 
-### `yarn start`
+// Find a path spec with the matching path.
+type MatchPath<T, P> = T extends { path: P } ? T : never;
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+// Object which has matching parameter keys for a path.
+export type PathParams<P extends Path> = {
+  [X in MatchPath<PathSpec, P>['params'][number]]: string;
+};
+```
+Small amount of TypeScript magic is applied here,
+but the end result is quite simple.
+Note how `PathParams` type behaves.
+- `PathParams<'/post/:id'>` is `{ id: string }`
+- `PathParams<'/calendar/:year/:month'>` is `{ year: string, month: string }`
+- `PathParams<'/'>` is `{}`
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+From here, a type-safe utility function is written
+for building URL strings.
+```ts
+/**
+ * Build an url with a path and its parameters.
+ * @param path target path.
+ * @param params parameters.
+ */
+export const buildUrl = <P extends Path>(
+  path: P,
+  params: PathParams<P>,
+): string => {
+  let ret: string = path;
 
-### `yarn test`
+  // Upcast `params` to be used in string replacement.
+  const paramObj: { [i: string]: string } = params;
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+  for (const spec of PATH_SPECS) {
+    if (spec.path === path) {
+      for (const key of spec.params) {
+        ret = ret.replace(`:${key}`, paramObj[key]);
+      }
 
-### `yarn build`
+      break;
+    }
+  }
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+  return ret;
+};
+```
+`buildUrl` function can be used like this:
+```ts
+buildUrl(
+  '/post/:id',
+  { id: 'abcd123' },
+); // returns '/post/abcd123'
+```
+`buildUrl` only takes a known path (from `PATH_SPECS`)
+as the first argument,
+therefore typo-proof. Sweet!
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### `src/components/TypedLink`
+Now, let's look at `TypedLink` a type-safe alternative to `Link`.
+```tsx
+import { Path, PathParams, buildUrl } from '../hooks/paths';
+import React, { ComponentType, ReactNode } from 'react';
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+import { Link } from 'react-router-dom';
 
-### `yarn eject`
+type TypedLinkProps<P extends Path> = {
+  to: P,
+  params: PathParams<P>,
+  replace?: boolean,
+  component?: ComponentType,
+  children?: ReactNode,
+};
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+/**
+ * Type-safe version of `react-router-dom/Link`.
+ */
+export const TypedLink = <P extends Path>({
+   to,
+   params,
+   replace,
+   component,
+   children,
+}: TypedLinkProps<P>) => {
+  return (
+    <Link
+      to={buildUrl(to, params)}
+      replace={replace}
+      component={component}
+    >
+      {children}
+    </Link>
+  );
+}
+```
+`TypedLink` can be used like this:
+```tsx
+<TypedLink to='/post/:id' params={{ id: 'abcd123' }} />
+```
+The `to` props of `TypedLink` only takes a known path,
+just like `buildUrl`.
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+### `src/components/TypedRedirect.tsx`
+`TypedRedirect` is implemented in same fashion as `TypedLink`.
+```tsx
+import { Path, PathParams, buildUrl } from '../hooks/paths';
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+import React from 'react';
+import { Redirect } from 'react-router-dom';
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+type TypedRedirectProps<P extends Path, Q extends Path> = {
+  to: P,
+  params: PathParams<P>,
+  push?: boolean,
+  from?: Q,
+};
 
-## Learn More
+/**
+ * Type-safe version of `react-router-dom/Redirect`.
+ */
+export const TypedRedirect = <P extends Path, Q extends Path>({
+  to,
+  params,
+  push,
+  from,
+}: TypedRedirectProps<P, Q>) => {
+  return (
+    <Redirect
+      to={buildUrl(to, params)}
+      push={push}
+      from={from}
+    />
+  );
+};
+```
+### `src/hooks/index.tsx`
+Instead of `useParams`
+which cannot infer the shape of params object,
+`useTypedParams` hook can be used.
+It can infer the type of params from `path` parameter.
+```ts
+/**
+ * Type-safe version of `react-router-dom/useParams`.
+ * @param path Path to match route.
+ * @returns parameter object if route matches. `null` otherwise.
+ */
+export const useTypedParams = <P extends Path>(
+  path: P
+): PathParams<P> | null => {
+  // `exact`, `sensitive` and `strict` options are set to true
+  // to ensure type safety.
+  const match = useRouteMatch({
+    path,
+    exact: true,
+    sensitive: true,
+    strict: true,
+  });
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+  if (!match || !isParams(path, match.params)) {
+    return null;
+  }
+  return match.params;
+}
+```
+Finally, `useTypedSwitch` allows type-safe `<Switch>` tree.
+```tsx
+/**
+ * A hook for defining route switch.
+ * @param routes 
+ * @param fallbackComponent 
+ */
+export const useTypedSwitch = (
+  routes: ReadonlyArray<{ path: Path, component: ComponentType }>,
+  fallbackComponent?: ComponentType,
+): ComponentType => {
+  const Fallback = fallbackComponent;
+  return () => (
+    <Switch>
+      {routes.map(({ path, component: RouteComponent }, i) => (
+        <Route exact strict sensitive path={path}>
+          <RouteComponent />
+        </Route>
+      ))}
+      {Fallback && <Fallback />}
+    </Switch>
+  );
+}
+```
+Here's how `<Switch>` is usually used:
+```tsx
+// Traditional approach.
+const App = () => (
+  <BrowserRouter>
+    <Switch>
+      <Route exact path='/' component={Home} />
+      <Route exact path='/user/:id' component={User} />
+    </Switch>
+  </BrowserRouter>
+);
+```
+The code above can be replaced with the following code.
+```tsx
+const App = () => {
+  const TypedSwitch = useTypedSwitch([
+    { path: '/', component: Home },
+    { path: '/user/:id', component: User },
+  ]);
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+  return (
+    <BrowserRouter>
+      <TypedSwitch />
+    </BrowserRouter>
+  );
+}
+```
+
+## Conclusion
+
+Original | Replaced
+---------|---------
+`<Link to='/user/123' />`|`<TypedLink to='/user/:id' params={ id: '123' } />`
+`<Redirect to='/user/123'>`|`<TypedRedirect to='/user/:id' params={ id: '123' } />`
+`useParams()`|`useTypedParams('/user/:id')`
+`<Switch>`|`useTypedSwitch`
+
+Type-safe alternatives are slightly more verbose than the original syntax,
+but I believe this is better for overall integrity of a project.
+- Developers can make changes in routes
+without worrying about broken links (at least they don't break silently).
+- Nice autocompletion while editing code.
+
+## How to Run This Example
+1. Clone this repo.
+2. `yarn`
+3. `yarn start`
