@@ -10,45 +10,32 @@ This example shows you how to use `react-router` in more type-safe way.
 ### `src/hooks/paths.tsx`
 The single source of truth for available paths is defined
 in this module.
-If a route needs to be modified, this `PATH_SPECS`
+If a route needs to be modified, this `PATHS`
 can be fixed, then TypeScript compiler will raise errors where
 type incompatibilities are found.
 ```tsx
-const PATH_SPECS = [
-  {
-    path: '/',
-    params: [],
-  },
-  {
-    path: '/signup',
-    params: [],
-  },
-  {
-    path: '/login',
-    params: [],
-  },
-  {
-    path: '/post/:id',
-    params: ['id'],
-  },
-  {
-    path: '/calendar/:year/:month',
-    params: ['year', 'month'],
-  },
+const PATHS = [
+  '/',
+  '/signup',
+  '/login',
+  '/post/:id',
+  '/calendar/:year/:month',
 ] as const;
 ```
-Utility types can be derived from this readonly array of spec objects.
+Utility types can be derived from this readonly array of paths.
 ```ts
-type PathSpec = (typeof PATH_SPECS)[number];
-export type Path = PathSpec['path'];
+type ExtractRouteParams<T> = string extends T
+    ? Record<string, string>
+    : T extends `${infer _Start}:${infer Param}/${infer Rest}`
+    ? { [k in Param | keyof ExtractRouteParams<Rest>]: string }
+    : T extends `${infer _Start}:${infer Param}`
+    ? { [k in Param]: string }
+    : {};
 
-// Find a path spec with the matching path.
-type MatchPath<T, P> = T extends { path: P } ? T : never;
+export type Path = (typeof PATHS)[number];
 
 // Object which has matching parameter keys for a path.
-export type PathParams<P extends Path> = {
-  [X in MatchPath<PathSpec, P>['params'][number]]: string;
-};
+export type PathParams<P extends Path> = ExtractRouteParams<P>;
 ```
 Small amount of TypeScript magic is applied here,
 but the end result is quite simple.
@@ -74,14 +61,8 @@ export const buildUrl = <P extends Path>(
   // Upcast `params` to be used in string replacement.
   const paramObj: { [i: string]: string } = params;
 
-  for (const spec of PATH_SPECS) {
-    if (spec.path === path) {
-      for (const key of spec.params) {
-        ret = ret.replace(`:${key}`, paramObj[key]);
-      }
-
-      break;
-    }
+  for (const key of Object.keys(paramObj)) {
+    ret = ret.replace(`:${key}`, paramObj[key]);
   }
 
   return ret;
@@ -94,7 +75,7 @@ buildUrl(
   { id: 'abcd123' },
 ); // returns '/post/abcd123'
 ```
-`buildUrl` only takes a known path (from `PATH_SPECS`)
+`buildUrl` only takes a known path (from `PATHS`)
 as the first argument,
 therefore typo-proof. Sweet!
 

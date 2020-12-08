@@ -1,36 +1,23 @@
-const PATH_SPECS = [
-  {
-    path: '/',
-    params: [],
-  },
-  {
-    path: '/signup',
-    params: [],
-  },
-  {
-    path: '/login',
-    params: [],
-  },
-  {
-    path: '/post/:id',
-    params: ['id'],
-  },
-  {
-    path: '/calendar/:year/:month',
-    params: ['year', 'month'],
-  },
+const PATHS = [
+  '/',
+  '/signup',
+  '/login',
+  '/post/:id',
+  '/calendar/:year/:month',
 ] as const;
 
-type PathSpec = (typeof PATH_SPECS)[number];
-export type Path = PathSpec['path'];
+type ExtractRouteParams<T> = string extends T
+    ? Record<string, string>
+    : T extends `${infer _Start}:${infer Param}/${infer Rest}`
+    ? { [k in Param | keyof ExtractRouteParams<Rest>]: string }
+    : T extends `${infer _Start}:${infer Param}`
+    ? { [k in Param]: string }
+    : {};
 
-// Find a path spec with the matching path.
-type MatchPath<T, P> = T extends { path: P } ? T : never;
+export type Path = (typeof PATHS)[number];
 
 // Object which has matching parameter keys for a path.
-export type PathParams<P extends Path> = {
-  [X in MatchPath<PathSpec, P>['params'][number]]: string;
-};
+export type PathParams<P extends Path> = ExtractRouteParams<P>;
 
 /**
  * Type predicate for checking whether params match the path specs.
@@ -55,7 +42,11 @@ export function isParams<P extends Path>(path: P, params: unknown): params is Pa
   const paramSet = new Set(Object.keys(params));
 
   // Validate params.
-  const requiredParams = PATH_SPECS.find((x) => x.path === path)?.params ?? [];
+  const requiredParams = path
+    .split('/')
+    .filter((s) => s.startsWith(':'))
+    .map((s) => s.substr(1));
+  console.log(requiredParams);
 
   for (const x of requiredParams) {
     if (!paramSet.has(x)) {
@@ -85,14 +76,8 @@ export const buildUrl = <P extends Path>(
   // Upcast `params` to be used in string replacement.
   const paramObj: { [i: string]: string } = params;
 
-  for (const spec of PATH_SPECS) {
-    if (spec.path === path) {
-      for (const key of spec.params) {
-        ret = ret.replace(`:${key}`, paramObj[key]);
-      }
-
-      break;
-    }
+  for (const key of Object.keys(paramObj)) {
+    ret = ret.replace(`:${key}`, paramObj[key]);
   }
 
   return ret;
